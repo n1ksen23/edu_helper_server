@@ -1,10 +1,18 @@
 # EduHelper API
 
-FastAPI + PostgreSQL + SQLAlchemy Async + Alembic. REST `/api/v1`, OpenAPI `/docs`, администрирование `/admin/`.
+FastAPI, PostgreSQL, SQLAlchemy Async, Alembic. REST `/api/v1`, OpenAPI `/docs`, администрирование `/admin/`.
+
+## Правила данных
+
+Расписание хранится только для конкретных дат в `days`. Шаблонов и повторяющихся правил нет. Повторение дня создаёт независимые копии на выбранные недели: изменение одной даты не меняет остальные. Тип недели — информация календаря, он не фильтрует пары и не изменяет сохранённый день.
+
+Подгруппы — только фиксированные метки `Пг 1` и `Пг 2` (`subgroup_id=1/2`, `null` — вся группа). Справочника и API управления подгруппами нет. Совпадающие номера пар допускаются для параллельных занятий. В ДЗ разделение описывается обычным текстом. Ученик не выбирает подгруппу.
+
+Заявка на новую группу: публичный POST `/group-requests` с `group_number` и `contacts`. Контакты доступны только администратору: GET `/admin/group-requests`, PATCH `/admin/group-requests/{id}` со статусом pending/approved/rejected. Заявка сама не создаёт и не публикует группу. Администратор создаёт группу и передаёт пароль по оставленным контактам. Ограничение: пять заявок в час на IP, без публичного чтения контактов.
 
 ## Запуск
 
-Скопируйте `.env.example` в `.env`, задайте случайные POSTGRES_PASSWORD/SECRET_KEY, согласуйте пароль DATABASE_URL. Получите Argon2id хеш командой ниже. В `.env` заключайте хеш в одинарные кавычки, чтобы Docker Compose не подставлял переменные вместо символов `$`.
+Скопируйте `.env.example` в `.env`, задайте случайные POSTGRES_PASSWORD/SECRET_KEY и согласуйте пароль DATABASE_URL. Хеш Argon2id заключайте в одинарные кавычки, чтобы Compose не подставлял переменные вместо `$`.
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -13,15 +21,17 @@ docker compose up -d --build
 docker compose exec api python -m app.import_legacy
 ```
 
-IMPORT_GROUP_PASSWORD задаёт исходный пароль 4992 (12+ символов). Повторный импорт сохраняет изменения. Начальное расписание публикуется на 18 недель; далее староста повторяет нужные дни через приложение. Миграция схемы выполняется Alembic при запуске контейнера.
+IMPORT_GROUP_PASSWORD задаёт исходный пароль 4992 (12+ символов). Импорт идемпотентен и не перезаписывает изменения. Исходное чередование недель разрешается при импорте в конкретные даты на первые 18 недель; дальше редактор задаёт или копирует нужные дни. JSON используется только для импорта.
 
-Публичные GET: groups, groups/{id}, groups/{id}/homework (archive/cursor), groups/{id}/calendar?start=...&end=..., subgroups. Записи ДЗ POST/PUT/DELETE. Датированный день GET/PUT days/{date}, POST days/{date}/repeat. Недельный шаблон GET/PUT templates/{weekday}, POST .../repeat. Подгруппы POST/PUT/DELETE. Повторение принимает start и weeks, заменяет указанные даты в одной транзакции. Auth: login, refresh, logout. Admin: GET/POST groups, PUT groups/{id}, POST groups/{id}/revoke под /admin.
+Публичные GET: groups, groups/{id}, groups/{id}/homework (archive/cursor), groups/{id}/calendar?start=...&end=.... ДЗ: POST/PUT/DELETE homework. День: GET/PUT days/{date}, POST days/{date}/repeat (start, weeks). Повторение заменяет выбранные даты в одной транзакции. GET subgroups оставлен только как статический список двух меток для совместимости ранее установленных клиентов. Auth: login, refresh, logout. Admin: GET/POST groups, PUT groups/{id}, POST groups/{id}/revoke под /admin.
 
 ## Production
 
-На VPS установите Docker Compose, Nginx, certbot. Клонируйте репозиторий в `/opt/eduhelper`. `.env` держите только на сервере, права 600. PostgreSQL не публикуется наружу, API доступен только через loopback:18080. Настройка Nginx в deploy/nginx.conf. Сначала получите сертификат `certbot certonly --webroot -w /var/www/letsencrypt -d eduhelper.cosmomine.ru`, затем включите HTTPS-конфигурацию. Включите certbot.timer. Внешний адрес: https://eduhelper.cosmomine.ru.
+Git checkout: `/opt/eduhelper`. `.env` только на сервере, права 600. PostgreSQL не публикуется наружу; API слушает loopback:18080. Nginx: deploy/nginx.conf. API и Android используют HTTPS https://eduhelper.cosmomine.ru. Web обслуживается из `/var/www/eduhelper`.
 
-Обновление: `git pull --ff-only && docker compose up -d --build`. Перед изменениями схемы сделайте резервную копию: `docker compose exec -T db pg_dump -U eduhelper eduhelper > backup.sql`. Восстановление: `docker compose exec -T db psql -U eduhelper eduhelper < backup.sql`. Не удаляйте volume PostgreSQL.
+Обновление: `git pull --ff-only && docker compose up -d --build`. Alembic выполняется при запуске. Перед миграциями сделайте резервную копию: `docker compose exec -T db pg_dump -U eduhelper eduhelper > backup.sql`. Восстановление: `docker compose exec -T db psql -U eduhelper eduhelper < backup.sql`. Не удаляйте volume PostgreSQL.
+
+Миграция 0003 удаляет прежние таблицы шаблонов и подгрупп, сохраняя фактически отображавшиеся пары каждой даты. Откат этой миграции требует восстановления резервной копии. До production-обновления создана копия `/opt/eduhelper-backups/before-0003-2026-10-22.sql.gz`; сравнение до/после подтвердило совпадение расписания на 126 датах.
 
 ## Проверки
 
@@ -30,8 +40,6 @@ python -m pip install pytest pytest-asyncio httpx aiosqlite
 python -m pytest -q
 ```
 
-Тесты по умолчанию используют изолированный SQLite Async, не рабочую БД. PostgreSQL и Alembic дополнительно проверяются на VPS. Гость читает только опубликованные активные группы. Редактор ограничен своей группой, администратор может менять любую. Смена группового пароля и отключение группы отзывают доступ немедленно. Refresh токены хешированы и ротируются. Панель хранит токены только в памяти вкладки. Login ограничен десятью попытками за минуту на IP (один процесс). Для нескольких API worker нужен общий Redis limiter.
+По умолчанию тесты используют SQLite. Для PostgreSQL задайте TEST_DATABASE_URL, указывающий только на отдельную тестовую БД: фикстура очищает её таблицы. Проверяются права, отзыв сессий, архив, даты, копирование, параллельные пары двух подгрупп, импорт и заявки. Рабочая база при тестировании не затрагивается.
 
-Telegram-уведомления и FCM не включены. Они могут использовать API/сервисный слой в будущем без изменения клиентской авторизации. Анализ исходника: docs/MIGRATION.md.
-
-Проверки на PostgreSQL: задайте TEST_DATABASE_URL, указывающий **только на отдельную тестовую БД**. Тестовая фикстура очищает таблицы этой БД. Подробный отчёт: docs/VERIFICATION.md. Web-клиент обслуживается Nginx из /var/www/eduhelper; backend по-прежнему независимо обслуживает /api/v1 и /admin/.
+Пароли — Argon2id. Access JWT на 10 минут, отзыв проверяется на каждом запросе. Refresh-токены хешируются и ротируются. Панель хранит токены в памяти. Login ограничен десятью попытками в минуту на IP; для нескольких API worker нужен общий limiter (Redis). Контакты заявок не включаются в публичные ответы или URL. Telegram/FCM не реализованы.
