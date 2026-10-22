@@ -1,6 +1,6 @@
 # EduHelper API
 
-FastAPI, PostgreSQL, SQLAlchemy Async, Alembic. REST `/api/v1`, OpenAPI `/docs`, администрирование `/admin/`.
+FastAPI, PostgreSQL, SQLAlchemy Async, Alembic. REST `/api/v1`, OpenAPI `/docs`. Администрирование — в приложении: Настройки → «Заявки и группы». Отдельная веб-панель удалена.
 
 ## Правила данных
 

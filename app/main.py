@@ -3,7 +3,6 @@ from collections import defaultdict, deque
 import secrets
 from fastapi import FastAPI, Depends, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from .models import db, Group, Homework, Session, GroupRequest
 from .schemas import (
@@ -373,9 +372,6 @@ async def repeat_week(
 async def subgroups(gid: int, s=Depends(optional_principal), database=Depends(db)):
     await public_group(database, gid, s)
     return [{"id": 1, "name": "Пг 1"}, {"id": 2, "name": "Пг 2"}]
-
-
-app.mount("/admin", StaticFiles(directory="admin", html=True), name="admin")
 
 
 @app.get(P + "/groups/{gid}/days/{day}")

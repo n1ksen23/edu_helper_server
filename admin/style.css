@@ -1,3 +1,0 @@
-:root{color-scheme:dark;font:16px system-ui;background:#10151c;color:#e6eef8}main{max-width:760px;margin:40px auto;padding:20px}h1{font-size:36px;color:#9ccbc8}form{display:grid;gap:16px;background:#1a2430;padding:24px;border-radius:20px}label{display:grid;gap:8px}input,select,button{font:inherit;padding:12px;border:1px solid #536779;border-radius:10px;background:#222f3e;color:inherit}input[type=checkbox]{width:24px;height:24px}button{cursor:pointer;background:#345f60;margin:4px}#status{color:#ffcc92;white-space:pre-wrap}#groups{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:24px}
-
-#requests article{background:#1a2430;border-radius:16px;padding:20px;margin:12px 0;overflow-wrap:anywhere} #requests strong{font-size:20px}
