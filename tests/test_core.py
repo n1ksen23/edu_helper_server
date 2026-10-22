@@ -1,15 +1,28 @@
 from datetime import date
-from types import SimpleNamespace
 import pytest
 from app.services import week_type, slot_time
 from app.main import P
 
 
-def test_week_new_year():
-    g = SimpleNamespace(anchor_monday=date(2026, 12, 28), anchor_week="upper")
-    assert week_type(g, date(2027, 1, 3)) == "upper"
-    assert week_type(g, date(2027, 1, 4)) == "lower"
-    assert week_type(g, date(2026, 12, 21)) == "lower"
+@pytest.mark.parametrize(
+    "day,expected",
+    [
+        (date(2026, 8, 31), "upper"),
+        (date(2026, 9, 1), "upper"),
+        (date(2026, 9, 6), "upper"),
+        (date(2026, 9, 7), "lower"),
+        (date(2026, 9, 14), "upper"),
+        (date(2026, 10, 19), "lower"),
+        (date(2027, 1, 3), "lower"),
+        (date(2027, 1, 4), "upper"),
+        (date(2027, 9, 1), "upper"),
+        (date(2027, 9, 6), "lower"),
+        (date(2024, 9, 1), "upper"),
+        (date(2024, 9, 2), "lower"),
+    ],
+)
+def test_week_from_september(day, expected):
+    assert week_type(day) == expected
 
 
 @pytest.mark.parametrize(

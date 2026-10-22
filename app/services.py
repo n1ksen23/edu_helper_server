@@ -9,13 +9,13 @@ def today(group):
     return datetime.now(ZoneInfo(group.timezone)).date()
 
 
-def week_type(group, day):
-    offset = ((day - timedelta(days=day.weekday())) - group.anchor_monday).days // 7
-    return (
-        group.anchor_week
-        if offset % 2 == 0
-        else ("upper" if group.anchor_week == "lower" else "lower")
-    )
+def week_type(day):
+    september = date(day.year, 9, 1)
+    first_monday = september - timedelta(days=september.weekday())
+    if day < first_monday:
+        september = date(day.year - 1, 9, 1)
+        first_monday = september - timedelta(days=september.weekday())
+    return "upper" if (day - first_monday).days // 7 % 2 == 0 else "lower"
 
 
 def slot_time(slot, shortened):
@@ -57,7 +57,7 @@ async def schedule_range(database, group, start, end):
     for offset in range((end - start).days + 1):
         current = start + timedelta(days=offset)
         row = mapping.get(current)
-        week = week_type(group, current)
+        week = week_type(current)
         shortened = row.shortened if row else current.weekday() == 5
         lessons = [] if current.weekday() == 6 or not row else row.lessons
         lessons = [

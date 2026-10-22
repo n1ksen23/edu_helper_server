@@ -22,8 +22,6 @@ class GroupIn(BaseModel):
     published: bool = False
     active: bool = True
     timezone: str = "Europe/Moscow"
-    anchor_monday: date = date(2026, 10, 19)
-    anchor_week: Literal["upper", "lower"] = "lower"
 
     @field_validator("timezone")
     @classmethod
@@ -32,13 +30,6 @@ class GroupIn(BaseModel):
             ZoneInfo(v)
         except Exception:
             raise ValueError("Неизвестный часовой пояс")
-        return v
-
-    @field_validator("anchor_monday")
-    @classmethod
-    def monday(cls, v):
-        if v.weekday() != 0:
-            raise ValueError("Опорная дата должна быть понедельником")
         return v
 
 

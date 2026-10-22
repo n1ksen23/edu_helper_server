@@ -30,7 +30,7 @@ from .auth import (
 from .config import settings
 from .services import public_group, homework_page, schedule_range, put_day
 
-app = FastAPI(title="EduHelper", version="1.0.2")
+app = FastAPI(title="EduHelper", version="1.0.3")
 P = "/api/v1"
 attempts = defaultdict(deque)
 
@@ -130,8 +130,6 @@ def group_out(g):
             "published",
             "active",
             "timezone",
-            "anchor_monday",
-            "anchor_week",
         )
     }
 

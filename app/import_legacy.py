@@ -7,7 +7,6 @@ from sqlalchemy import select
 from .models import SessionLocal, Group, Homework, Day
 from .auth import ph
 from .schemas import DayIn
-from .services import week_type
 
 
 async def main():
@@ -52,7 +51,14 @@ async def main():
                     select(Day.id).where(Day.group_id == group.id, Day.date == day)
                 ):
                     continue
-                week = week_type(group, day)
+                # Preserve the original import's dated lessons, independently of
+                # the automatic academic-year labels used by the live calendar.
+                offset = (day - group.anchor_monday).days // 7
+                week = (
+                    group.anchor_week
+                    if offset % 2 == 0
+                    else ("upper" if group.anchor_week == "lower" else "lower")
+                )
                 lessons = [
                     {k: v for k, v in l.items() if k not in ("day", "week")}
                     for l in schedule["lessons"]
