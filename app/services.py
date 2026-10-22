@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import select, tuple_
-from .models import Group, Homework, Day, Subgroup
+from .models import Group, Homework, Day
 
 
 def today(group):
@@ -44,49 +44,28 @@ async def public_group(database, gid, actor=None):
 async def validate_day(database, gid, data, day=None):
     if day and day.weekday() == 6 and data.lessons:
         raise HTTPException(422, "В воскресенье занятия запрещены")
-    ids = {l.subgroup_id for l in data.lessons if l.subgroup_id is not None}
-    if ids:
-        found = set(
-            (
-                await database.scalars(
-                    select(Subgroup.id).where(
-                        Subgroup.group_id == gid, Subgroup.id.in_(ids)
-                    )
-                )
-            ).all()
-        )
-        if ids != found:
-            raise HTTPException(422, "Подгруппа не принадлежит группе")
 
 
-async def schedule_range(database, group, start, end, preview=None):
+async def schedule_range(database, group, start, end):
     days = (
         await database.scalars(
             select(Day).where(Day.group_id == group.id, Day.date.between(start, end))
         )
     ).all()
     mapping = {d.date: d for d in days}
-    subgroups = {
-        s.id: s.name
-        for s in await database.scalars(
-            select(Subgroup).where(Subgroup.group_id == group.id)
-        )
-    }
     result = []
     for offset in range((end - start).days + 1):
         current = start + timedelta(days=offset)
         row = mapping.get(current)
-        week = preview or week_type(group, current)
+        week = week_type(group, current)
         shortened = row.shortened if row else current.weekday() == 5
-        lessons = (
-            []
-            if current.weekday() == 6 or not row
-            else [l for l in row.lessons if l["week"] in ("both", week)]
-        )
+        lessons = [] if current.weekday() == 6 or not row else row.lessons
         lessons = [
             {
                 **l,
-                "subgroup_name": subgroups.get(l.get("subgroup_id")),
+                "subgroup_name": "Пг " + str(l["subgroup_id"])
+                if l.get("subgroup_id")
+                else None,
                 **slot_time(l["slot"], shortened),
             }
             for l in sorted(lessons, key=lambda l: l["slot"])
@@ -137,3 +116,19 @@ async def put_day(database, gid, day, data):
     row.shortened = data.shortened
     row.lessons = [l.model_dump() for l in data.lessons]
     return row
+
+
+async def submit_application(database, data):
+    from .models import GroupRequest
+
+    # Repeated taps/retries do not create duplicate pending requests.
+    existing = await database.scalar(
+        select(GroupRequest.id).where(
+            GroupRequest.group_number == data.group_number,
+            GroupRequest.contacts == data.contacts,
+            GroupRequest.status == "pending",
+        )
+    )
+    if existing is None:
+        database.add(GroupRequest(**data.model_dump()))
+        await database.commit()

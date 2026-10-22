@@ -56,8 +56,7 @@ class Lesson(BaseModel):
     subject: str = Field(min_length=1, max_length=300)
     teacher: str = Field(default="", max_length=300)
     room: str = Field(default="", max_length=100)
-    subgroup_id: int | None = None
-    week: Literal["upper", "lower", "both"] = "both"
+    subgroup_id: Literal[1, 2] | None = None
 
 
 class DayIn(BaseModel):
@@ -72,3 +71,15 @@ class Repeat(BaseModel):
 
 class NameIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+
+
+class GroupRequestIn(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    group_number: str = Field(
+        min_length=1, max_length=50, pattern=r"^[0-9A-Za-zА-Яа-я][0-9A-Za-zА-Яа-я -]*$"
+    )
+    contacts: str = Field(min_length=5, max_length=1000)
+
+
+class GroupRequestStatus(BaseModel):
+    status: Literal["pending", "approved", "rejected"]

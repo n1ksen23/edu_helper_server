@@ -6,7 +6,6 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
-    Integer,
     UniqueConstraint,
     Index,
     CheckConstraint,
@@ -37,16 +36,6 @@ class Group(Base):
     anchor_week: Mapped[str] = mapped_column(String(5), default="lower")
 
 
-class Subgroup(Base):
-    __tablename__ = "subgroups"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    group_id: Mapped[int] = mapped_column(
-        ForeignKey("groups.id", ondelete="CASCADE"), index=True
-    )
-    name: Mapped[str] = mapped_column(String(100))
-    __table_args__ = (UniqueConstraint("group_id", "name"),)
-
-
 class Homework(Base):
     __tablename__ = "homework"
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -62,19 +51,6 @@ class Homework(Base):
     __table_args__ = (
         Index("ix_homework_group_due_id", "group_id", "due_date", "id"),
         UniqueConstraint("group_id", "legacy_id"),
-    )
-
-
-class Template(Base):
-    __tablename__ = "templates"
-    id: Mapped[int] = mapped_column(primary_key=True)
-    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"))
-    weekday: Mapped[int] = mapped_column(Integer)
-    shortened: Mapped[bool] = mapped_column(Boolean)
-    lessons: Mapped[list] = mapped_column(JSON, default=list)
-    __table_args__ = (
-        UniqueConstraint("group_id", "weekday"),
-        CheckConstraint("weekday BETWEEN 1 AND 6"),
     )
 
 
@@ -98,6 +74,19 @@ class Session(Base):
     refresh_hash: Mapped[str] = mapped_column(String(64))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class GroupRequest(Base):
+    __tablename__ = "group_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_number: Mapped[str] = mapped_column(String(50))
+    contacts: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(10), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    __table_args__ = (
+        Index("ix_group_requests_status_id", "status", "id"),
+        CheckConstraint("status IN ('pending', 'approved', 'rejected')"),
+    )
 
 
 engine = create_async_engine(settings.database_url, pool_pre_ping=True)

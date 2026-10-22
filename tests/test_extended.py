@@ -32,33 +32,48 @@ async def test_today_boundary_sql_and_dates(client, setup, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_templates_explicit_publication_and_hidden_admin(client, setup):
+async def test_unique_days_copy_and_hidden_admin(client, setup):
     admin, editor, g, e = setup
     body = {
         "shortened": True,
         "lessons": [
-            {"slot": 1, "subject": "Upper", "week": "upper"},
-            {"slot": 1, "subject": "Lower", "week": "lower"},
+            {"slot": 1, "subject": "A", "subgroup_id": 1},
+            {"slot": 1, "subject": "B", "subgroup_id": 2},
         ],
     }
     assert (
-        await client.put(f"{P}/groups/{g[0]}/templates/6", headers=editor, json=body)
+        await client.put(
+            f"{P}/groups/{g[0]}/days/2026-10-24", headers=editor, json=body
+        )
     ).status_code == 200
-    url = f"{P}/groups/{g[0]}/calendar?start=2026-10-24&end=2026-10-24"
-    assert (await client.get(url)).json()[0]["lessons"] == []
-    await client.post(
-        f"{P}/groups/{g[0]}/templates/6/repeat",
-        headers=editor,
-        json={"start": "2026-10-24", "weeks": 2},
-    )
-    assert (await client.get(url)).json()[0]["lessons"][0]["subject"] == "Lower"
-    assert (await client.get(url + "&preview=upper")).json()[0]["lessons"][0][
-        "subject"
-    ] == "Upper"
-    raw = (
-        await client.get(f"{P}/groups/{g[0]}/days/2026-10-24", headers=editor)
+    assert (
+        await client.post(
+            f"{P}/groups/{g[0]}/days/2026-10-24/repeat",
+            headers=editor,
+            json={"start": "2026-10-31", "weeks": 2},
+        )
+    ).status_code == 200
+    rows = (
+        await client.get(f"{P}/groups/{g[0]}/calendar?start=2026-10-24&end=2026-11-07")
     ).json()
-    assert len(raw["lessons"]) == 2
+    assert rows[0]["week"] != rows[7]["week"]
+    assert rows[0]["lessons"] == rows[7]["lessons"] == rows[14]["lessons"]
+    changed = {"shortened": False, "lessons": [{"slot": 2, "subject": "Unique change"}]}
+    await client.put(f"{P}/groups/{g[0]}/days/2026-10-31", headers=editor, json=changed)
+    rows = (
+        await client.get(f"{P}/groups/{g[0]}/calendar?start=2026-10-24&end=2026-11-07")
+    ).json()
+    assert rows[0]["lessons"][0]["subject"] == "A"
+    assert rows[7]["lessons"][0]["subject"] == "Unique change"
+    assert rows[14]["lessons"][0]["subject"] == "A"
+    assert (
+        await client.get(f"{P}/groups/{g[0]}/templates/6", headers=editor)
+    ).status_code == 404
+    assert (
+        await client.post(
+            f"{P}/groups/{g[0]}/subgroups", headers=editor, json={"name": "Пг 3"}
+        )
+    ).status_code == 405
     assert (
         await client.get(f"{P}/groups/{g[2]}/homework", headers=admin)
     ).status_code == 200

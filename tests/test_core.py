@@ -105,16 +105,7 @@ async def test_archive_calendar_and_isolation(client, setup):
 @pytest.mark.asyncio
 async def test_schedule_repeat_parallel_sunday(client, setup):
     admin, editor, g, e = setup
-    sid = (
-        await client.post(
-            f"{P}/groups/{g[0]}/subgroups", headers=editor, json={"name": "Пг 1"}
-        )
-    ).json()["id"]
-    sid2 = (
-        await client.post(
-            f"{P}/groups/{g[0]}/subgroups", headers=editor, json={"name": "Пг 2"}
-        )
-    ).json()["id"]
+    sid, sid2 = 1, 2
     body = {
         "shortened": True,
         "lessons": [
@@ -146,7 +137,7 @@ async def test_schedule_repeat_parallel_sunday(client, setup):
     assert rows[1]["lessons"] == [] and len(rows[14]["lessons"]) == 2
     assert (
         await client.delete(f"{P}/groups/{g[0]}/subgroups/{sid}", headers=editor)
-    ).status_code == 409
+    ).status_code == 404
     body["lessons"][0]["subgroup_id"] = 999
     assert (
         await client.put(

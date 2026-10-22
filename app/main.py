@@ -5,8 +5,17 @@ from fastapi import FastAPI, Depends, HTTPException, Request, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
-from .models import db, Group, Homework, Template, Subgroup, Session
-from .schemas import GroupIn, Login, Refresh, HomeworkIn, DayIn, Repeat, NameIn
+from .models import db, Group, Homework, Session, GroupRequest
+from .schemas import (
+    GroupIn,
+    Login,
+    Refresh,
+    HomeworkIn,
+    DayIn,
+    Repeat,
+    GroupRequestIn,
+    GroupRequestStatus,
+)
 from .auth import (
     ph,
     verify,
@@ -20,32 +29,41 @@ from .auth import (
     optional_principal,
 )
 from .config import settings
-from .services import public_group, homework_page, schedule_range, put_day, validate_day
+from .services import public_group, homework_page, schedule_range, put_day
 
-app = FastAPI(title="EduHelper", version="1.0.0")
+app = FastAPI(title="EduHelper", version="1.0.1")
 P = "/api/v1"
 attempts = defaultdict(deque)
 
 
 @app.middleware("http")
 async def security(request: Request, call_next):
-    if request.url.path == P + "/auth/login":
-        key = request.client.host
+    if (
+        request.url.path in (P + "/auth/login", P + "/group-requests")
+        and request.method == "POST"
+    ):
+        is_application = request.url.path.endswith("/group-requests")
+        window, maximum = (3600, 5) if is_application else (60, 10)
+        key = (request.url.path, request.client.host)
         queue = attempts[key]
         now = datetime.now().timestamp()
-        while queue and queue[0] < now - 60:
+        while queue and queue[0] < now - window:
             queue.popleft()
-        if len(queue) >= 10:
+        if len(queue) >= maximum:
             from fastapi.responses import JSONResponse
 
             return JSONResponse(
-                {"detail": "Слишком много попыток. Повторите через минуту"},
+                {
+                    "detail": "Слишком много заявок. Повторите через час"
+                    if is_application
+                    else "Слишком много попыток. Повторите через минуту"
+                },
                 status_code=429,
             )
         queue.append(now)
         if len(attempts) > 10000:
             for old in list(attempts):
-                if not attempts[old] or attempts[old][-1] < now - 60:
+                if not attempts[old] or attempts[old][-1] < now - 3600:
                     attempts.pop(old, None)
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -255,14 +273,13 @@ async def calendar(
     gid: int,
     start: date,
     end: date,
-    preview: str | None = Query(None, pattern="^(upper|lower)$"),
     s=Depends(optional_principal),
     database=Depends(db),
 ):
     if end < start or (end - start).days > 92:
         raise HTTPException(422, "Диапазон должен быть от 1 до 93 дней")
     g = await public_group(database, gid, s)
-    days = await schedule_range(database, g, start, end, preview)
+    days = await schedule_range(database, g, start, end)
     hw = (
         await database.scalars(
             select(Homework)
@@ -306,123 +323,11 @@ async def repeat_day(
     return {"count": data.weeks}
 
 
-@app.get(P + "/groups/{gid}/templates/{weekday}")
-async def get_template(
-    gid: int, weekday: int, s=Depends(principal), database=Depends(db)
-):
-    authorize(s, gid)
-    row = await database.scalar(
-        select(Template).where(Template.group_id == gid, Template.weekday == weekday)
-    )
-    return jsonable_encoder(row) if row else {"shortened": weekday == 6, "lessons": []}
-
-
-@app.put(P + "/groups/{gid}/templates/{weekday}")
-async def save_template(
-    gid: int, weekday: int, data: DayIn, s=Depends(principal), database=Depends(db)
-):
-    authorize(s, gid)
-    if weekday not in range(1, 7):
-        raise HTTPException(422, "День недели должен быть от 1 до 6")
-    await validate_day(database, gid, data)
-    row = await database.scalar(
-        select(Template).where(Template.group_id == gid, Template.weekday == weekday)
-    )
-    if not row:
-        row = Template(group_id=gid, weekday=weekday)
-        database.add(row)
-    row.shortened = data.shortened
-    row.lessons = [l.model_dump() for l in data.lessons]
-    await database.commit()
-    return jsonable_encoder(row)
-
-
-@app.post(P + "/groups/{gid}/templates/{weekday}/repeat")
-async def repeat_template(
-    gid: int, weekday: int, data: Repeat, s=Depends(principal), database=Depends(db)
-):
-    authorize(s, gid)
-    row = await database.scalar(
-        select(Template).where(Template.group_id == gid, Template.weekday == weekday)
-    )
-    if not row:
-        raise HTTPException(404, "Шаблон не найден")
-    if data.start.isoweekday() != weekday:
-        raise HTTPException(422, "День недели не совпадает")
-    for n in range(data.weeks):
-        await put_day(
-            database,
-            gid,
-            data.start + timedelta(weeks=n),
-            DayIn(shortened=row.shortened, lessons=row.lessons),
-        )
-    await database.commit()
-    return {"count": data.weeks}
-
-
+# Read-only fixed options kept for compatibility with installed clients.
 @app.get(P + "/groups/{gid}/subgroups")
 async def subgroups(gid: int, s=Depends(optional_principal), database=Depends(db)):
     await public_group(database, gid, s)
-    return jsonable_encoder(
-        (
-            await database.scalars(
-                select(Subgroup).where(Subgroup.group_id == gid).order_by(Subgroup.id)
-            )
-        ).all()
-    )
-
-
-@app.post(P + "/groups/{gid}/subgroups", status_code=201)
-async def add_subgroup(
-    gid: int, data: NameIn, s=Depends(principal), database=Depends(db)
-):
-    authorize(s, gid)
-    if await database.scalar(
-        select(Subgroup.id).where(Subgroup.group_id == gid, Subgroup.name == data.name)
-    ):
-        raise HTTPException(409, "Подгруппа уже существует")
-    row = Subgroup(group_id=gid, name=data.name)
-    database.add(row)
-    await database.commit()
-    return jsonable_encoder(row)
-
-
-@app.put(P + "/groups/{gid}/subgroups/{sid}")
-async def edit_subgroup(
-    gid: int, sid: int, data: NameIn, s=Depends(principal), database=Depends(db)
-):
-    authorize(s, gid)
-    row = await database.get(Subgroup, sid)
-    if not row or row.group_id != gid:
-        raise HTTPException(404, "Подгруппа не найдена")
-    duplicate = await database.scalar(
-        select(Subgroup.id).where(
-            Subgroup.group_id == gid, Subgroup.name == data.name, Subgroup.id != sid
-        )
-    )
-    if duplicate:
-        raise HTTPException(409, "Подгруппа уже существует")
-    row.name = data.name
-    await database.commit()
-    return jsonable_encoder(row)
-
-
-@app.delete(P + "/groups/{gid}/subgroups/{sid}", status_code=204)
-async def delete_subgroup(
-    gid: int, sid: int, s=Depends(principal), database=Depends(db)
-):
-    from .models import Day
-
-    authorize(s, gid)
-    row = await database.get(Subgroup, sid)
-    if not row or row.group_id != gid:
-        raise HTTPException(404, "Подгруппа не найдена")
-    for model in (Day, Template):
-        for day in await database.scalars(select(model).where(model.group_id == gid)):
-            if any(l.get("subgroup_id") == sid for l in day.lessons):
-                raise HTTPException(409, "Подгруппа используется в расписании")
-    await database.delete(row)
-    await database.commit()
+    return [{"id": 1, "name": "Пг 1"}, {"id": 2, "name": "Пг 2"}]
 
 
 app.mount("/admin", StaticFiles(directory="admin", html=True), name="admin")
@@ -439,3 +344,43 @@ async def raw_day(gid: int, day: date, s=Depends(principal), database=Depends(db
         if row
         else {"date": day, "shortened": day.weekday() == 5, "lessons": []}
     )
+
+
+@app.post(P + "/group-requests", status_code=202)
+async def submit_group_request(data: GroupRequestIn, database=Depends(db)):
+    from .services import submit_application
+
+    await submit_application(database, data)
+    return {"message": "Заявка отправлена"}
+
+
+@app.get(P + "/admin/group-requests", dependencies=[Depends(admin)])
+async def group_requests(
+    status: str | None = Query(None, pattern="^(pending|approved|rejected)$"),
+    before: int | None = Query(None, ge=1),
+    database=Depends(db),
+):
+    query = select(GroupRequest)
+    if status:
+        query = query.where(GroupRequest.status == status)
+    if before:
+        query = query.where(GroupRequest.id < before)
+    rows = (
+        await database.scalars(query.order_by(GroupRequest.id.desc()).limit(51))
+    ).all()
+    return {
+        "items": jsonable_encoder(rows[:50]),
+        "next_cursor": rows[49].id if len(rows) > 50 else None,
+    }
+
+
+@app.patch(P + "/admin/group-requests/{rid}", dependencies=[Depends(admin)])
+async def change_group_request(
+    rid: int, data: GroupRequestStatus, database=Depends(db)
+):
+    row = await database.get(GroupRequest, rid)
+    if not row:
+        raise HTTPException(404, "Заявка не найдена")
+    row.status = data.status
+    await database.commit()
+    return jsonable_encoder(row)

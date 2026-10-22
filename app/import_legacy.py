@@ -1,12 +1,13 @@
-"""One-time, repeatable legacy import. Existing edits are never overwritten."""
+"""Repeatable import into concrete dates. Never overwrites subsequent edits."""
 
 import asyncio, json, os
 from pathlib import Path
 from datetime import date, timedelta
 from sqlalchemy import select
-from .models import SessionLocal, Group, Homework, Template, Day
+from .models import SessionLocal, Group, Homework, Day
 from .auth import ph
 from .schemas import DayIn
+from .services import week_type
 
 
 async def main():
@@ -44,44 +45,31 @@ async def main():
                         due_date=date.fromisoformat(h["due"]),
                     )
                 )
-        for weekday in range(1, 7):
-            if await db.scalar(
-                select(Template.id).where(
-                    Template.group_id == group.id, Template.weekday == weekday
-                )
-            ):
-                continue
-            lessons = [
-                {k: v for k, v in l.items() if k != "day"}
-                for l in schedule["lessons"]
-                if l["day"] == weekday
-            ]
-            data = DayIn(shortened=weekday == 6, lessons=lessons)
-            db.add(
-                Template(
-                    group_id=group.id,
-                    weekday=weekday,
-                    shortened=data.shortened,
-                    lessons=[l.model_dump() for l in data.lessons],
-                )
-            )
-            # Explicit initial 18-week publication; templates never apply indefinitely.
-            for n in range(18):
+        for n in range(18):
+            for weekday in range(1, 7):
                 day = group.anchor_monday + timedelta(days=weekday - 1, weeks=n)
-                if not await db.scalar(
+                if await db.scalar(
                     select(Day.id).where(Day.group_id == group.id, Day.date == day)
                 ):
-                    db.add(
-                        Day(
-                            group_id=group.id,
-                            date=day,
-                            shortened=data.shortened,
-                            lessons=[l.model_dump() for l in data.lessons],
-                        )
+                    continue
+                week = week_type(group, day)
+                lessons = [
+                    {k: v for k, v in l.items() if k not in ("day", "week")}
+                    for l in schedule["lessons"]
+                    if l["day"] == weekday and l.get("week", "both") in ("both", week)
+                ]
+                data = DayIn(shortened=weekday == 6, lessons=lessons)
+                db.add(
+                    Day(
+                        group_id=group.id,
+                        date=day,
+                        shortened=data.shortened,
+                        lessons=[l.model_dump() for l in data.lessons],
                     )
+                )
         await db.commit()
         print(
-            f"Imported group {group.id}: {len(homework)} homework records; templates and dated schedule preserved"
+            f"Imported group {group.id}: {len(homework)} homework records; concrete dated schedule preserved"
         )
 
 
