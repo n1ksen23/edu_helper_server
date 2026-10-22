@@ -21,6 +21,7 @@ async def client():
         transport=ASGITransport(app=app), base_url="https://test"
     ) as c:
         yield c
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture
