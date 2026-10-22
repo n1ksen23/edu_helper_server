@@ -67,6 +67,8 @@ class DayIn(BaseModel):
 class Repeat(BaseModel):
     start: date
     weeks: int = Field(ge=1, le=104)
+    interval_weeks: Literal[1, 2] = 1
+    overwrite: bool = True
 
 
 class NameIn(BaseModel):

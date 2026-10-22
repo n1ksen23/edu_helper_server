@@ -31,7 +31,7 @@ from .auth import (
 from .config import settings
 from .services import public_group, homework_page, schedule_range, put_day
 
-app = FastAPI(title="EduHelper", version="1.0.1")
+app = FastAPI(title="EduHelper", version="1.0.2")
 P = "/api/v1"
 attempts = defaultdict(deque)
 
@@ -317,10 +317,55 @@ async def repeat_day(
     if data.start.weekday() != day.weekday():
         raise HTTPException(422, "Выберите тот же день недели")
     payload = DayIn(shortened=source.shortened, lessons=source.lessons)
+    count = 0
     for n in range(data.weeks):
-        await put_day(database, gid, data.start + timedelta(weeks=n), payload)
+        target = data.start + timedelta(weeks=n * data.interval_weeks)
+        if not data.overwrite and await database.scalar(
+            select(Day.id).where(Day.group_id == gid, Day.date == target)
+        ):
+            continue
+        await put_day(database, gid, target, payload)
+        count += 1
     await database.commit()
-    return {"count": data.weeks}
+    return {"count": count, "skipped": data.weeks - count}
+
+
+@app.post(P + "/groups/{gid}/weeks/{monday}/repeat")
+async def repeat_week(
+    gid: int, monday: date, data: Repeat, s=Depends(principal), database=Depends(db)
+):
+    from .models import Day
+
+    authorize(s, gid)
+    if monday.weekday() != 0 or data.start.weekday() != 0 or data.start <= monday:
+        raise HTTPException(422, "Выберите понедельник будущей недели")
+    sources = (
+        await database.scalars(
+            select(Day).where(
+                Day.group_id == gid,
+                Day.date.between(monday, monday + timedelta(days=5)),
+            )
+        )
+    ).all()
+    if not sources:
+        raise HTTPException(422, "Сначала сохраните расписание выбранной недели")
+    snapshots = [
+        (row.date.weekday(), DayIn(shortened=row.shortened, lessons=row.lessons))
+        for row in sources
+    ]
+    count = skipped = 0
+    for n in range(data.weeks):
+        for offset, payload in snapshots:
+            target = data.start + timedelta(weeks=n * data.interval_weeks, days=offset)
+            if not data.overwrite and await database.scalar(
+                select(Day.id).where(Day.group_id == gid, Day.date == target)
+            ):
+                skipped += 1
+                continue
+            await put_day(database, gid, target, payload)
+            count += 1
+    await database.commit()
+    return {"count": count, "skipped": skipped}
 
 
 # Read-only fixed options kept for compatibility with installed clients.
@@ -378,9 +423,37 @@ async def group_requests(
 async def change_group_request(
     rid: int, data: GroupRequestStatus, database=Depends(db)
 ):
-    row = await database.get(GroupRequest, rid)
+    row = await database.scalar(
+        select(GroupRequest).where(GroupRequest.id == rid).with_for_update()
+    )
     if not row:
         raise HTTPException(404, "Заявка не найдена")
     row.status = data.status
     await database.commit()
     return jsonable_encoder(row)
+
+
+@app.post(
+    P + "/admin/group-requests/{rid}/accept",
+    dependencies=[Depends(admin)],
+    status_code=201,
+)
+async def accept_group_request(rid: int, data: GroupIn, database=Depends(db)):
+    row = await database.scalar(
+        select(GroupRequest).where(GroupRequest.id == rid).with_for_update()
+    )
+    if not row:
+        raise HTTPException(404, "Заявка не найдена")
+    if row.status != "pending":
+        raise HTTPException(409, "Заявка уже обработана")
+    if not data.password:
+        raise HTTPException(422, "Укажите пароль длиной от 12 символов")
+    if await database.scalar(select(Group.id).where(Group.name == data.name)):
+        raise HTTPException(409, "Такая группа уже существует")
+    group = Group(
+        **data.model_dump(exclude={"password"}), password_hash=ph.hash(data.password)
+    )
+    database.add(group)
+    row.status = "approved"
+    await database.commit()
+    return group_out(group)
