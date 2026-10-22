@@ -38,3 +38,7 @@ async def admin(s=Depends(principal)):
     return s
 async def revoke(database,group_id):
     await database.execute(update(Session).where(Session.group_id==group_id).values(revoked=True))
+
+async def optional_principal(credentials: HTTPAuthorizationCredentials = Depends(bearer), database=Depends(db)):
+    if credentials is None: return None
+    return await principal(credentials,database)

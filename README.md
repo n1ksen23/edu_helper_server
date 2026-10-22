@@ -4,7 +4,7 @@ FastAPI + PostgreSQL + SQLAlchemy Async + Alembic. REST `/api/v1`, OpenAPI `/doc
 
 ## Запуск
 
-Скопируйте `.env.example` в `.env`, задайте случайные POSTGRES_PASSWORD/SECRET_KEY, согласуйте пароль DATABASE_URL. Получите Argon2id хеш: `python -c "from argon2 import PasswordHasher; import getpass; print(PasswordHasher().hash(getpass.getpass()))))"` (используйте корректную команду ниже).
+Скопируйте `.env.example` в `.env`, задайте случайные POSTGRES_PASSWORD/SECRET_KEY, согласуйте пароль DATABASE_URL. Получите Argon2id хеш командой ниже. В `.env` заключайте хеш в одинарные кавычки, чтобы Docker Compose не подставлял переменные вместо символов `$`.
 
 ```powershell
 python -m pip install -r requirements.txt

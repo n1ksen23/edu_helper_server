@@ -12,9 +12,11 @@ def slot_time(slot,shortened):
     start=510+(slot-1)*(70 if shortened else 110)+(35 if not shortened and slot>=3 else 0)
     end=start+(60 if shortened else 100)
     return {'start':f'{start//60:02}:{start%60:02}','end':f'{end//60:02}:{end%60:02}'}
-async def public_group(database,gid):
+async def public_group(database,gid,actor=None):
     g=await database.get(Group,gid)
-    if not g or not g.active or not g.published: raise HTTPException(404,'Группа не найдена')
+    if not g: raise HTTPException(404,'Группа не найдена')
+    allowed=actor and (actor.role=='admin' or (actor.group_id==gid and g.active))
+    if not allowed and (not g.active or not g.published): raise HTTPException(404,'Группа не найдена')
     return g
 async def validate_day(database,gid,data,day=None):
     if day and day.weekday()==6 and data.lessons: raise HTTPException(422,'В воскресенье занятия запрещены')
@@ -25,12 +27,13 @@ async def validate_day(database,gid,data,day=None):
 async def schedule_range(database,group,start,end,preview=None):
     days=(await database.scalars(select(Day).where(Day.group_id==group.id,Day.date.between(start,end)))).all()
     mapping={d.date:d for d in days}
+    subgroups={s.id:s.name for s in await database.scalars(select(Subgroup).where(Subgroup.group_id==group.id))}
     result=[]
     for offset in range((end-start).days+1):
         current=start+timedelta(days=offset); row=mapping.get(current); week=preview or week_type(group,current)
         shortened=row.shortened if row else current.weekday()==5
         lessons=[] if current.weekday()==6 or not row else [l for l in row.lessons if l['week'] in ('both',week)]
-        lessons=[{**l,**slot_time(l['slot'],shortened)} for l in sorted(lessons,key=lambda l:l['slot'])]
+        lessons=[{**l,'subgroup_name':subgroups.get(l.get('subgroup_id')),**slot_time(l['slot'],shortened)} for l in sorted(lessons,key=lambda l:l['slot'])]
         result.append({'date':current,'week':week,'shortened':shortened,'lessons':lessons})
     return result
 async def homework_page(database,group,archive=False,cursor=None):

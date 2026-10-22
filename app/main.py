@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, delete
 from .models import db, Group, Homework, Template, Subgroup, Session
 from .schemas import GroupIn, Login, Refresh, HomeworkIn, DayIn, Repeat, NameIn
-from .auth import ph, verify, issue, principal, admin, authorize, revoke, digest, tokens
+from .auth import ph, verify, issue, principal, admin, authorize, revoke, digest, tokens, optional_principal
 from .config import settings
 from .services import public_group, homework_page, schedule_range, put_day, validate_day
 app=FastAPI(title='EduHelper',version='1.0.0')
@@ -63,9 +63,9 @@ async def groups(q:str=Query('',max_length=100),database=Depends(db)):
     rows=await database.scalars(select(Group).where(Group.published==True,Group.active==True,Group.name.contains(q,autoescape=True)).order_by(Group.name))
     return [group_out(g) for g in rows]
 @app.get(P+'/groups/{gid}')
-async def group(gid:int,database=Depends(db)): return group_out(await public_group(database,gid))
+async def group(gid:int,s=Depends(optional_principal),database=Depends(db)): return group_out(await public_group(database,gid,s))
 @app.get(P+'/admin/groups',dependencies=[Depends(admin)])
-async def admin_groups(database=Depends(db)): return [group_out(g) for g in await database.scalars(select(Group).order_by(Group.name))]
+async def admin_groups(q:str='',database=Depends(db)): return [group_out(g) for g in await database.scalars(select(Group).where(Group.name.contains(q,autoescape=True)).order_by(Group.name))]
 @app.post(P+'/admin/groups',dependencies=[Depends(admin)],status_code=201)
 async def create_group(data:GroupIn,database=Depends(db)):
     if not data.password: raise HTTPException(422,'Укажите пароль длиной от 12 символов')
@@ -84,8 +84,8 @@ async def update_group(gid:int,data:GroupIn,database=Depends(db)):
 @app.post(P+'/admin/groups/{gid}/revoke',dependencies=[Depends(admin)],status_code=204)
 async def revoke_sessions(gid:int,database=Depends(db)): await revoke(database,gid); await database.commit()
 @app.get(P+'/groups/{gid}/homework')
-async def homework(gid:int,archive:bool=False,cursor:str|None=None,database=Depends(db)):
-    return jsonable_encoder(await homework_page(database,await public_group(database,gid),archive,cursor))
+async def homework(gid:int,archive:bool=False,cursor:str|None=None,s=Depends(optional_principal),database=Depends(db)):
+    return jsonable_encoder(await homework_page(database,await public_group(database,gid,s),archive,cursor))
 @app.post(P+'/groups/{gid}/homework',status_code=201)
 async def add_homework(gid:int,data:HomeworkIn,s=Depends(principal),database=Depends(db)):
     authorize(s,gid)
@@ -104,9 +104,9 @@ async def edit_homework(gid:int,hid:int,data:HomeworkIn,s=Depends(principal),dat
 async def delete_homework(gid:int,hid:int,s=Depends(principal),database=Depends(db)):
     authorize(s,gid); await database.delete(await owned_homework(database,gid,hid)); await database.commit()
 @app.get(P+'/groups/{gid}/calendar')
-async def calendar(gid:int,start:date,end:date,preview:str|None=Query(None,pattern='^(upper|lower)$'),database=Depends(db)):
+async def calendar(gid:int,start:date,end:date,preview:str|None=Query(None,pattern='^(upper|lower)$'),s=Depends(optional_principal),database=Depends(db)):
     if end<start or (end-start).days>92: raise HTTPException(422,'Диапазон должен быть от 1 до 93 дней')
-    g=await public_group(database,gid)
+    g=await public_group(database,gid,s)
     days=await schedule_range(database,g,start,end,preview)
     hw=(await database.scalars(select(Homework).where(Homework.group_id==gid,Homework.due_date.between(start,end)).order_by(Homework.due_date,Homework.id))).all()
     for day in days: day['homework']=[h for h in hw if h.due_date==day['date']]
@@ -146,8 +146,8 @@ async def repeat_template(gid:int,weekday:int,data:Repeat,s=Depends(principal),d
     for n in range(data.weeks): await put_day(database,gid,data.start+timedelta(weeks=n),DayIn(shortened=row.shortened,lessons=row.lessons))
     await database.commit(); return {'count':data.weeks}
 @app.get(P+'/groups/{gid}/subgroups')
-async def subgroups(gid:int,database=Depends(db)):
-    await public_group(database,gid)
+async def subgroups(gid:int,s=Depends(optional_principal),database=Depends(db)):
+    await public_group(database,gid,s)
     return jsonable_encoder((await database.scalars(select(Subgroup).where(Subgroup.group_id==gid).order_by(Subgroup.id))).all())
 @app.post(P+'/groups/{gid}/subgroups',status_code=201)
 async def add_subgroup(gid:int,data:NameIn,s=Depends(principal),database=Depends(db)):
