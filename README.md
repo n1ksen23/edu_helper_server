@@ -8,7 +8,7 @@ FastAPI, PostgreSQL, SQLAlchemy Async, Alembic. REST `/api/v1`, OpenAPI `/docs`,
 
 Подгруппы — только фиксированные метки `Пг 1` и `Пг 2` (`subgroup_id=1/2`, `null` — вся группа). Справочника и API управления подгруппами нет. Совпадающие номера пар допускаются для параллельных занятий. В ДЗ разделение описывается обычным текстом. Ученик не выбирает подгруппу.
 
-Заявка на новую группу: публичный POST `/group-requests` с `group_number` и `contacts`. Контакты доступны только администратору: GET `/admin/group-requests`, PATCH `/admin/group-requests/{id}` со статусом pending/approved/rejected. Заявка сама не создаёт и не публикует группу. Администратор создаёт группу и передаёт пароль по оставленным контактам. Ограничение: пять заявок в час на IP, без публичного чтения контактов.
+Заявка на новую группу: публичный POST `/group-requests` с `group_number` и `contacts`. Контакты доступны только администратору: GET `/admin/group-requests`, PATCH `/admin/group-requests/{id}` со статусом pending/approved/rejected. POST /admin/group-requests/{id}/accept с GroupIn создаёт группу и принимает новую заявку одной транзакцией. Повторное принятие возвращает 409. Управление доступно в Flutter: Настройки → «Заявки и группы». Заявка сама не создаёт и не публикует группу. Администратор создаёт группу и передаёт пароль по оставленным контактам. Ограничение: пять заявок в час на IP, без публичного чтения контактов.
 
 ## Запуск
 
@@ -23,7 +23,7 @@ docker compose exec api python -m app.import_legacy
 
 IMPORT_GROUP_PASSWORD задаёт исходный пароль 4992 (12+ символов). Импорт идемпотентен и не перезаписывает изменения. Исходное чередование недель разрешается при импорте в конкретные даты на первые 18 недель; дальше редактор задаёт или копирует нужные дни. JSON используется только для импорта.
 
-Публичные GET: groups, groups/{id}, groups/{id}/homework (archive/cursor), groups/{id}/calendar?start=...&end=.... ДЗ: POST/PUT/DELETE homework. День: GET/PUT days/{date}, POST days/{date}/repeat (start, weeks). Повторение заменяет выбранные даты в одной транзакции. GET subgroups оставлен только как статический список двух меток для совместимости ранее установленных клиентов. Auth: login, refresh, logout. Admin: GET/POST groups, PUT groups/{id}, POST groups/{id}/revoke под /admin.
+Публичные GET: groups, groups/{id}, groups/{id}/homework (archive/cursor), groups/{id}/calendar?start=...&end=.... ДЗ: POST/PUT/DELETE homework. День: GET/PUT days/{date}, POST days/{date}/repeat и weeks/{monday}/repeat (start, weeks — число повторов, interval_weeks=1|2, overwrite). Повторение создаёт независимые даты в одной транзакции; overwrite=false пропускает сохранённые дни, true заменяет их. Копируются только сохранённые исходные дни Пн–Сб. GET subgroups оставлен только как статический список двух меток для совместимости ранее установленных клиентов. Auth: login, refresh, logout. Admin: GET/POST groups, PUT groups/{id}, POST groups/{id}/revoke под /admin.
 
 ## Production
 
